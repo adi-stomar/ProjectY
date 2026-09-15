@@ -31,7 +31,9 @@ export function getAllQuestions(): Question[] {
 
   const subjects = ['chemistry', 'physics', 'mathematics'];
   const questions: Question[] = [];
-  const baseDir = path.join(process.cwd(), 'dataset');
+  const baseDir = fs.existsSync(path.join(process.cwd(), 'public', 'dataset'))
+    ? path.join(process.cwd(), 'public', 'dataset')
+    : path.join(process.cwd(), 'dataset');
 
   for (const subj of subjects) {
     const subjDir = path.join(baseDir, subj);

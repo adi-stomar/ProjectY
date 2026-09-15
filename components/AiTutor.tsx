@@ -199,6 +199,15 @@ export const AiTutor: React.FC = () => {
     setLoading(true);
 
     try {
+      // Pass previous conversation turns so the AI retains full context
+      const historyPayload = messages
+        .filter((m) => m.id !== 'welcome')
+        .slice(-12)
+        .map((m) => ({
+          sender: m.sender,
+          text: m.text,
+        }));
+
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -207,6 +216,7 @@ export const AiTutor: React.FC = () => {
           imageBase64: currentImgBase64,
           imageMime: currentImgMime,
           mode,
+          history: historyPayload,
         }),
       });
 

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(req: NextRequest) {
   try {
-    const { message, imageBase64, imageMime, mode = 'solution' } = await req.json();
+    const { message, imageBase64, imageMime, mode = 'solution', history = [] } = await req.json();
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
@@ -17,31 +17,67 @@ export async function POST(req: NextRequest) {
       modeInstruction = "Provide the standard step-by-step method, followed by a dedicated '⚡ 30-Second Exam Shortcut' section highlighting dimensional analysis, option elimination, symmetry, or boundary value testing for rapid solving in JEE.";
     }
 
-    const promptText = `You are an expert tutor for Indian engineering (JEE Mains & Advanced). ${modeInstruction}\n\nStudent Query: ${message || 'Please analyze and solve the question in this image.'}`;
+    const systemInstructionText = `You are an expert tutor for Indian engineering (JEE Mains & Advanced). Always retain and build upon the conversational context and previously discussed topics in this chat. If the student refers to previous explanations, formulas, or asks for follow-up questions, stay on topic with what was discussed. ${modeInstruction}`;
 
-    const parts: any[] = [];
+    // Build multi-turn contents array
+    const contents: any[] = [];
+
+    // Add prior conversation turns if provided
+    if (Array.isArray(history) && history.length > 0) {
+      // Keep recent conversation history (last 12 turns) to stay well within limits
+      const recentHistory = history.slice(-12);
+      for (const item of recentHistory) {
+        if (!item || !item.text || !item.text.trim()) continue;
+        const role = item.sender === 'user' ? 'user' : 'model';
+
+        // Gemini rule 1: First turn must be 'user'
+        if (contents.length === 0 && role === 'model') continue;
+
+        // Gemini rule 2: Consecutive turns with same role must be merged
+        if (contents.length > 0 && contents[contents.length - 1].role === role) {
+          contents[contents.length - 1].parts[0].text += `\n\n${item.text}`;
+        } else {
+          contents.push({
+            role,
+            parts: [{ text: item.text }],
+          });
+        }
+      }
+    }
+
+    // Prepare current user message parts
+    const currentParts: any[] = [];
     if (imageBase64) {
-      parts.push({
+      currentParts.push({
         inlineData: {
           mimeType: imageMime || 'image/jpeg',
           data: imageBase64,
         },
       });
     }
-    parts.push({
-      text: promptText,
-    });
+    const currentText = message && message.trim() 
+      ? message.trim() 
+      : (imageBase64 ? 'Please analyze and solve the question in this image.' : 'Hello');
+    currentParts.push({ text: currentText });
+
+    // Append current turn to contents
+    if (contents.length > 0 && contents[contents.length - 1].role === 'user') {
+      contents[contents.length - 1].parts.push(...currentParts);
+    } else {
+      contents.push({
+        role: 'user',
+        parts: currentParts,
+      });
+    }
 
     // Smart Model Fallback Array
-    // Prioritizing Gemini 3.5 Flash Lite as requested for ultra-fast responses and 500 RPD quota
     const FALLBACK_MODELS = [
       'gemini-3.5-flash-lite',
-      'gemini-3.1-flash-lite',
-      'gemini-2.5-flash-lite',
+      'gemini-3.6-flash',
       'gemini-3.5-flash',
-      'gemini-2.5-flash',
-      'gemini-1.5-flash',
-      'gemini-flash-latest'
+      'gemini-3.1-flash-lite',
+      'gemini-flash-latest',
+      'gemini-1.5-flash'
     ];
 
     let data: any = null;
@@ -53,9 +89,12 @@ export async function POST(req: NextRequest) {
         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          signal: AbortSignal.timeout(12000), // 12-second timeout per model so it never hangs
+          signal: AbortSignal.timeout(15000), // 15-second timeout per model
           body: JSON.stringify({
-            contents: [{ parts }],
+            system_instruction: {
+              parts: [{ text: systemInstructionText }],
+            },
+            contents,
           }),
         });
 
